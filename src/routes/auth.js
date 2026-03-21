@@ -65,7 +65,7 @@ async function authRoutes(fastify) {
       return reply.redirect(`${frontendUrl}/auth/callback?token=${jwt}`);
     } catch (err) {
       fastify.log.error('[Auth] OAuth error:', err.message);
-      return reply.redirect(`${frontendUrl}/login?error=auth_failed`);
+      return reply.redirect(`${frontendUrl}/login?error=auth_failed&message=${encodeURIComponent(err.message)}`);
     }
   });
 
