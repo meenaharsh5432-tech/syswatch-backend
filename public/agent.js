@@ -37,12 +37,14 @@ async function collectMetrics() {
 
   const memTotal = osTotalMem;
   const memUsed = Math.min(mem.active ?? mem.used, memTotal);
+  const pageFile = Math.max(0, (mem.total ?? 0) - memTotal);
 
   return {
     cpu: parseFloat((cpuLoad.currentLoad || 0).toFixed(1)),
     memory: {
       used: memUsed,
       total: memTotal,
+      pageFile,
       usedPercent: parseFloat(((memUsed / memTotal) * 100).toFixed(1))
     },
     disk: {

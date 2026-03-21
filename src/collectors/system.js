@@ -14,9 +14,11 @@ async function collectSystemMetrics() {
 
     const memTotal = os.totalmem();
     const memUsed = Math.min(mem.active ?? mem.used ?? 0, memTotal);
+    const pageFile = Math.max(0, (mem.total ?? 0) - memTotal);
     const memory = {
       used: memUsed,
       total: memTotal,
+      pageFile,
       usedPercent: parseFloat(((memUsed / memTotal) * 100).toFixed(1))
     };
 
