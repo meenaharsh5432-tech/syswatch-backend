@@ -1,150 +1,76 @@
-const path = require('path');
-const fs = require('fs');
+const { MongoClient } = require('mongodb');
 const crypto = require('crypto');
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/syswatch.db');
+const MONGODB_URI = process.env.MONGODB_URI;
+const DB_NAME = 'syswatch';
 
+let client = null;
 let db = null;
 
-function queryAll(sql, params = []) {
-  if (!db) return [];
-  try {
-    const stmt = db.prepare(sql);
-    stmt.bind(params);
-    const rows = [];
-    while (stmt.step()) rows.push(stmt.getAsObject());
-    stmt.free();
-    return rows;
-  } catch (err) {
-    console.error('[DB] queryAll error:', err.message, '|', sql);
-    return [];
-  }
-}
-
-function queryOne(sql, params = []) {
-  return queryAll(sql, params)[0] || null;
-}
-
-function run(sql, params = []) {
-  if (!db) return;
-  try {
-    db.run(sql, params);
-  } catch (err) {
-    console.error('[DB] run error:', err.message, '|', sql);
-  }
-}
-
-function columnExists(table, column) {
-  const cols = queryAll(`PRAGMA table_info(${table})`);
-  return cols.some(c => c.name === column);
-}
-
-function saveDB() {
-  if (!db) return;
-  try {
-    const data = db.export();
-    const dir = path.dirname(DB_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DB_PATH, Buffer.from(data));
-  } catch (err) {
-    console.error('[DB] Save error:', err.message);
-  }
+async function getNextId(name) {
+  const result = await db.collection('counters').findOneAndUpdate(
+    { _id: name },
+    { $inc: { seq: 1 } },
+    { upsert: true, returnDocument: 'after' }
+  );
+  return result.seq;
 }
 
 async function initDB() {
-  try {
-    const SQL = await require('sql.js')();
-    const dir = path.dirname(DB_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!MONGODB_URI) throw new Error('MONGODB_URI environment variable is required');
+  client = new MongoClient(MONGODB_URI);
+  await client.connect();
+  db = client.db(DB_NAME);
 
-    if (fs.existsSync(DB_PATH)) {
-      db = new SQL.Database(fs.readFileSync(DB_PATH));
-    } else {
-      db = new SQL.Database();
-    }
+  await db.collection('users').createIndex({ email: 1 }, { unique: true });
+  await db.collection('users').createIndex({ google_id: 1 });
+  await db.collection('users').createIndex({ id: 1 }, { unique: true });
+  await db.collection('agents').createIndex({ api_key: 1 }, { unique: true });
+  await db.collection('agents').createIndex({ user_id: 1 });
+  await db.collection('agents').createIndex({ id: 1 }, { unique: true });
+  await db.collection('logs').createIndex({ agent_id: 1, id: -1 });
+  await db.collection('metrics_history').createIndex({ agent_id: 1, id: -1 });
 
-    // Base tables
-    db.run(`
-      CREATE TABLE IF NOT EXISTS metrics_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cpu REAL, memory REAL, disk_pct REAL, net_rx REAL, net_tx REAL,
-        timestamp TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp TEXT NOT NULL, level TEXT NOT NULL,
-        service TEXT NOT NULL, message TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        name TEXT, avatar TEXT, google_id TEXT UNIQUE,
-        plan TEXT DEFAULT 'free',
-        stripe_customer_id TEXT,
-        stripe_subscription_id TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE TABLE IF NOT EXISTS agents (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        api_key TEXT UNIQUE NOT NULL,
-        last_seen TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-      );
-    `);
-
-    // Migrations — add agent_id to existing tables
-    if (!columnExists('metrics_history', 'agent_id')) {
-      db.run('ALTER TABLE metrics_history ADD COLUMN agent_id INTEGER');
-    }
-    if (!columnExists('logs', 'agent_id')) {
-      db.run('ALTER TABLE logs ADD COLUMN agent_id INTEGER');
-    }
-
-    // Indexes
-    db.run(`
-      CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics_history(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_metrics_agent ON metrics_history(agent_id);
-      CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
-      CREATE INDEX IF NOT EXISTS idx_logs_agent ON logs(agent_id);
-      CREATE INDEX IF NOT EXISTS idx_agents_key ON agents(api_key);
-      CREATE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id);
-    `);
-
-    setInterval(saveDB, 30000);
-    console.log('[DB] Initialized at', DB_PATH);
-  } catch (err) {
-    console.error('[DB] Init failed:', err.message);
-  }
+  console.log('[DB] Connected to MongoDB Atlas');
 }
 
 // ---- Users ----
-function createUser({ email, name, avatar, google_id }) {
-  run('INSERT OR IGNORE INTO users (email, name, avatar, google_id) VALUES (?, ?, ?, ?)',
-    [email, name || null, avatar || null, google_id || null]);
-  return queryOne('SELECT * FROM users WHERE email = ?', [email]);
+async function createUser({ email, name, avatar, google_id }) {
+  const existing = await db.collection('users').findOne({ email }, { projection: { _id: 0 } });
+  if (existing) return existing;
+  const id = await getNextId('users');
+  const user = {
+    id, email,
+    name: name || null,
+    avatar: avatar || null,
+    google_id: google_id || null,
+    plan: 'free',
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    created_at: new Date().toISOString()
+  };
+  await db.collection('users').insertOne(user);
+  const { _id, ...safe } = user;
+  return safe;
 }
 
-function getUserById(id) {
-  return queryOne('SELECT * FROM users WHERE id = ?', [id]);
+async function getUserById(id) {
+  return db.collection('users').findOne({ id }, { projection: { _id: 0 } });
 }
 
-function getUserByGoogleId(googleId) {
-  return queryOne('SELECT * FROM users WHERE google_id = ?', [googleId]);
+async function getUserByGoogleId(googleId) {
+  return db.collection('users').findOne({ google_id: googleId }, { projection: { _id: 0 } });
 }
 
-function getUserByStripeCustomer(customerId) {
-  return queryOne('SELECT * FROM users WHERE stripe_customer_id = ?', [customerId]);
+async function getUserByStripeCustomer(customerId) {
+  return db.collection('users').findOne({ stripe_customer_id: customerId }, { projection: { _id: 0 } });
 }
 
-function updateUserPlan(userId, plan, stripeCustomerId = null, stripeSubId = null) {
-  run(
-    'UPDATE users SET plan = ?, stripe_customer_id = COALESCE(?, stripe_customer_id), stripe_subscription_id = COALESCE(?, stripe_subscription_id) WHERE id = ?',
-    [plan, stripeCustomerId, stripeSubId, userId]
-  );
+async function updateUserPlan(userId, plan, stripeCustomerId = null, stripeSubId = null) {
+  const update = { plan };
+  if (stripeCustomerId) update.stripe_customer_id = stripeCustomerId;
+  if (stripeSubId) update.stripe_subscription_id = stripeSubId;
+  await db.collection('users').updateOne({ id: userId }, { $set: update });
 }
 
 // ---- Agents ----
@@ -156,115 +82,114 @@ function getAgentStatus(lastSeen) {
   return 'offline';
 }
 
-function createAgent(userId, name) {
+async function createAgent(userId, name) {
   const apiKey = 'sk-agent-' + crypto.randomBytes(24).toString('hex');
-  run('INSERT INTO agents (user_id, name, api_key) VALUES (?, ?, ?)', [userId, name, apiKey]);
-  const agent = queryOne('SELECT * FROM agents WHERE api_key = ?', [apiKey]);
-  return agent;
+  const id = await getNextId('agents');
+  const agent = {
+    id, user_id: userId, name,
+    api_key: apiKey,
+    last_seen: null,
+    created_at: new Date().toISOString()
+  };
+  await db.collection('agents').insertOne(agent);
+  const { _id, ...safe } = agent;
+  return safe;
 }
 
-function getAgentsByUserId(userId) {
-  return queryAll('SELECT * FROM agents WHERE user_id = ?', [userId])
-    .map(a => ({ ...a, status: getAgentStatus(a.last_seen) }));
+async function getAgentsByUserId(userId) {
+  const agents = await db.collection('agents').find({ user_id: userId }, { projection: { _id: 0 } }).toArray();
+  return agents.map(a => ({ ...a, status: getAgentStatus(a.last_seen) }));
 }
 
-function getAgentById(id) {
-  const a = queryOne('SELECT * FROM agents WHERE id = ?', [id]);
+async function getAgentById(id) {
+  const a = await db.collection('agents').findOne({ id }, { projection: { _id: 0 } });
   return a ? { ...a, status: getAgentStatus(a.last_seen) } : null;
 }
 
-function getAgentByApiKey(apiKey) {
-  return queryOne('SELECT * FROM agents WHERE api_key = ?', [apiKey]);
+async function getAgentByApiKey(apiKey) {
+  return db.collection('agents').findOne({ api_key: apiKey }, { projection: { _id: 0 } });
 }
 
-function updateAgentLastSeen(agentId) {
-  run('UPDATE agents SET last_seen = ? WHERE id = ?', [new Date().toISOString(), agentId]);
+async function updateAgentLastSeen(agentId) {
+  await db.collection('agents').updateOne({ id: agentId }, { $set: { last_seen: new Date().toISOString() } });
 }
 
-function deleteAgent(id, userId) {
-  run('DELETE FROM agents WHERE id = ? AND user_id = ?', [id, userId]);
+async function deleteAgent(id, userId) {
+  await db.collection('agents').deleteOne({ id, user_id: userId });
 }
 
 // ---- Metrics ----
-function insertMetric(metric, agentId = null) {
-  if (!db) return;
+async function insertMetric(metric, agentId = null) {
   try {
-    db.run(
-      'INSERT INTO metrics_history (cpu, memory, disk_pct, net_rx, net_tx, timestamp, agent_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [
-        metric.cpu ?? 0,
-        metric.memory?.usedPercent ?? 0,
-        metric.disk?.usePct ?? 0,
-        metric.network?.rxMbps ?? 0,
-        metric.network?.txMbps ?? 0,
-        metric.timestamp ?? new Date().toISOString(),
-        agentId
-      ]
-    );
-    if (agentId) {
-      db.run('DELETE FROM metrics_history WHERE agent_id = ? AND id NOT IN (SELECT id FROM metrics_history WHERE agent_id = ? ORDER BY id DESC LIMIT 1000)', [agentId, agentId]);
-    } else {
-      db.run('DELETE FROM metrics_history WHERE agent_id IS NULL AND id NOT IN (SELECT id FROM metrics_history WHERE agent_id IS NULL ORDER BY id DESC LIMIT 1000)');
+    const id = await getNextId('metrics_history');
+    await db.collection('metrics_history').insertOne({
+      id,
+      cpu: metric.cpu ?? 0,
+      memory: metric.memory?.usedPercent ?? 0,
+      disk_pct: metric.disk?.usePct ?? 0,
+      net_rx: metric.network?.rxMbps ?? 0,
+      net_tx: metric.network?.txMbps ?? 0,
+      timestamp: metric.timestamp ?? new Date().toISOString(),
+      agent_id: agentId
+    });
+    // Keep only last 1000 per agent
+    const query = agentId !== null ? { agent_id: agentId } : { agent_id: null };
+    const count = await db.collection('metrics_history').countDocuments(query);
+    if (count > 1000) {
+      const oldest = await db.collection('metrics_history')
+        .find(query, { projection: { _id: 1 } })
+        .sort({ id: 1 }).limit(count - 1000).toArray();
+      await db.collection('metrics_history').deleteMany({ _id: { $in: oldest.map(d => d._id) } });
     }
   } catch (err) {
     console.error('[DB] insertMetric error:', err.message);
   }
 }
 
-function getMetricHistory(limit = 60, agentId = null) {
-  let sql, params;
-  if (agentId) {
-    sql = 'SELECT * FROM metrics_history WHERE agent_id = ? ORDER BY id DESC LIMIT ?';
-    params = [agentId, limit];
-  } else {
-    sql = 'SELECT * FROM metrics_history WHERE agent_id IS NULL ORDER BY id DESC LIMIT ?';
-    params = [limit];
-  }
-  return queryAll(sql, params).reverse();
+async function getMetricHistory(limit = 60, agentId = null) {
+  const query = agentId !== null ? { agent_id: agentId } : { agent_id: null };
+  const results = await db.collection('metrics_history')
+    .find(query, { projection: { _id: 0 } })
+    .sort({ id: -1 }).limit(limit).toArray();
+  return results.reverse();
 }
 
 // ---- Logs ----
-function insertLog(log, agentId = null) {
-  if (!db) return log;
+async function insertLog(log, agentId = null) {
   try {
     const timestamp = log.timestamp ?? new Date().toISOString();
     const level = (log.level ?? 'info').toUpperCase();
     const service = log.service ?? 'system';
     const message = log.message ?? '';
-    db.run(
-      'INSERT INTO logs (timestamp, level, service, message, agent_id) VALUES (?, ?, ?, ?, ?)',
-      [timestamp, level, service, message, agentId]
-    );
-    const idRow = queryOne('SELECT last_insert_rowid() as id');
-    const id = idRow?.id ?? null;
-    if (agentId) {
-      db.run('DELETE FROM logs WHERE agent_id = ? AND id NOT IN (SELECT id FROM logs WHERE agent_id = ? ORDER BY id DESC LIMIT 5000)', [agentId, agentId]);
-    } else {
-      db.run('DELETE FROM logs WHERE agent_id IS NULL AND id NOT IN (SELECT id FROM logs WHERE agent_id IS NULL ORDER BY id DESC LIMIT 5000)');
+    const id = await getNextId('logs');
+    await db.collection('logs').insertOne({ id, timestamp, level, service, message, agent_id: agentId });
+    // Keep only last 5000 per agent
+    const query = agentId !== null ? { agent_id: agentId } : { agent_id: null };
+    const count = await db.collection('logs').countDocuments(query);
+    if (count > 5000) {
+      const oldest = await db.collection('logs')
+        .find(query, { projection: { _id: 1 } })
+        .sort({ id: 1 }).limit(count - 5000).toArray();
+      await db.collection('logs').deleteMany({ _id: { $in: oldest.map(d => d._id) } });
     }
-    return { ...log, id, timestamp, level, service, message };
+    return { id, timestamp, level, service, message, agent_id: agentId };
   } catch (err) {
     console.error('[DB] insertLog error:', err.message);
     return log;
   }
 }
 
-function getLogs(limit = 100, level = null, agentId = null) {
-  const whereAgent = agentId ? 'agent_id = ?' : 'agent_id IS NULL';
-  const agentParam = agentId ? [agentId] : [];
-  let sql, params;
-  if (level && level.toLowerCase() !== 'all') {
-    sql = `SELECT * FROM logs WHERE ${whereAgent} AND level = ? ORDER BY id DESC LIMIT ?`;
-    params = [...agentParam, level.toUpperCase(), limit];
-  } else {
-    sql = `SELECT * FROM logs WHERE ${whereAgent} ORDER BY id DESC LIMIT ?`;
-    params = [...agentParam, limit];
-  }
-  return queryAll(sql, params).reverse();
+async function getLogs(limit = 100, level = null, agentId = null) {
+  const query = agentId !== null ? { agent_id: agentId } : { agent_id: null };
+  if (level && level.toLowerCase() !== 'all') query.level = level.toUpperCase();
+  const results = await db.collection('logs')
+    .find(query, { projection: { _id: 0 } })
+    .sort({ id: -1 }).limit(limit).toArray();
+  return results.reverse();
 }
 
 module.exports = {
-  initDB, saveDB,
+  initDB,
   createUser, getUserById, getUserByGoogleId, getUserByStripeCustomer, updateUserPlan,
   createAgent, getAgentsByUserId, getAgentById, getAgentByApiKey,
   updateAgentLastSeen, deleteAgent, getAgentStatus,

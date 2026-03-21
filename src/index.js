@@ -69,9 +69,9 @@ async function bootstrap() {
   await initDB();
 
   // Wire up log emitter → DB + SSE
-  logEmitter.on('log', (log) => {
+  logEmitter.on('log', async (log) => {
     try {
-      const saved = insertLog(log);
+      const saved = await insertLog(log);
       broadcast({ type: 'log', data: saved });
     } catch (err) {
       fastify.log.error('[LogEmitter] Failed to persist log:', err.message);

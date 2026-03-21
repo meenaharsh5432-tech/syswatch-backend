@@ -4,7 +4,7 @@ const { requireAuth } = require('../middleware/auth');
 async function agentsRoutes(fastify) {
   // GET /api/agents
   fastify.get('/api/agents', { preHandler: [requireAuth] }, async (req, reply) => {
-    const agents = getAgentsByUserId(req.user.userId);
+    const agents = await getAgentsByUserId(req.user.userId);
     return reply.send(agents.map(({ api_key, ...safe }) => safe));
   });
 
@@ -15,7 +15,7 @@ async function agentsRoutes(fastify) {
       return reply.status(400).send({ error: 'validation_error', message: 'Agent name is required' });
     }
 
-    const agent = createAgent(req.user.userId, name.trim());
+    const agent = await createAgent(req.user.userId, name.trim());
     const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`;
     const installCommand = `curl -sSL ${backendUrl}/install.sh | SYSWATCH_URL=${backendUrl} AGENT_KEY=${agent.api_key} bash`;
 
@@ -28,7 +28,7 @@ async function agentsRoutes(fastify) {
 
   // GET /api/agents/:id
   fastify.get('/api/agents/:id', { preHandler: [requireAuth] }, async (req, reply) => {
-    const agent = getAgentById(parseInt(req.params.id));
+    const agent = await getAgentById(parseInt(req.params.id));
     if (!agent || agent.user_id !== req.user.userId) {
       return reply.status(404).send({ error: 'not_found', message: 'Agent not found' });
     }
@@ -39,11 +39,11 @@ async function agentsRoutes(fastify) {
   // DELETE /api/agents/:id
   fastify.delete('/api/agents/:id', { preHandler: [requireAuth] }, async (req, reply) => {
     const agentId = parseInt(req.params.id);
-    const agent = getAgentById(agentId);
+    const agent = await getAgentById(agentId);
     if (!agent || agent.user_id !== req.user.userId) {
       return reply.status(404).send({ error: 'not_found', message: 'Agent not found' });
     }
-    deleteAgent(agentId, req.user.userId);
+    await deleteAgent(agentId, req.user.userId);
     return reply.send({ ok: true });
   });
 }

@@ -47,9 +47,9 @@ async function authRoutes(fastify) {
       const profile = await profileRes.json();
       if (!profile.email) throw new Error('Failed to get user profile from Google');
 
-      let user = getUserByGoogleId(profile.id);
+      let user = await getUserByGoogleId(profile.id);
       if (!user) {
-        user = createUser({
+        user = await createUser({
           email: profile.email,
           name: profile.name,
           avatar: profile.picture,
@@ -71,7 +71,7 @@ async function authRoutes(fastify) {
 
   // GET /api/auth/me — current user info
   fastify.get('/api/auth/me', { preHandler: [requireAuth] }, async (req, reply) => {
-    const user = getUserById(req.user.userId);
+    const user = await getUserById(req.user.userId);
     if (!user) return reply.status(404).send({ error: 'not_found', message: 'User not found' });
     const { google_id, stripe_customer_id, stripe_subscription_id, ...safe } = user;
     return reply.send(safe);
@@ -79,7 +79,7 @@ async function authRoutes(fastify) {
 
   // POST /api/auth/refresh — re-issue JWT with latest plan info
   fastify.post('/api/auth/refresh', { preHandler: [requireAuth] }, async (req, reply) => {
-    const user = getUserById(req.user.userId);
+    const user = await getUserById(req.user.userId);
     if (!user) return reply.status(404).send({ error: 'not_found', message: 'User not found' });
     const jwt = fastify.jwt.sign(
       { userId: user.id, email: user.email, plan: user.plan },

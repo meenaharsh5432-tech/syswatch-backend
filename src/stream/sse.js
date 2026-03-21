@@ -51,13 +51,13 @@ async function collectAndBroadcast() {
       collectDockerMetrics()
     ]);
 
-    insertMetric(system);
+    await insertMetric(system);
 
     const level = (system.cpu > 85 || system.memory.usedPercent > 90) ? 'ERROR'
       : (system.cpu > 70 || system.memory.usedPercent > 75) ? 'WARN' : 'INFO';
     emitAppLog(level, 'syswatch', `CPU ${system.cpu}% · MEM ${system.memory.usedPercent}% · DISK ${system.disk.usePct}%`);
 
-    const recentLogs = getLogs(20);
+    const recentLogs = await getLogs(20);
     broadcast({ type: 'metrics', data: { system, containers, recentLogs } }, 'local');
   } catch (err) {
     console.error('[SSE] collectAndBroadcast error:', err.message);

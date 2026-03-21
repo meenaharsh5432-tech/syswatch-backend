@@ -6,7 +6,7 @@ async function logsRoutes(fastify) {
     try {
       const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
       const level = req.query.level || null;
-      const logs = getLogs(limit, level);
+      const logs = await getLogs(limit, level);
       return reply.send(logs);
     } catch (err) {
       fastify.log.error(err);
@@ -28,8 +28,8 @@ async function logsRoutes(fastify) {
         message: String(message).substring(0, 500)
       };
 
-      insertLog(log);
-      broadcast({ type: 'log', data: log });
+      const saved = await insertLog(log);
+      broadcast({ type: 'log', data: saved });
 
       return reply.status(201).send({ ok: true, log });
     } catch (err) {

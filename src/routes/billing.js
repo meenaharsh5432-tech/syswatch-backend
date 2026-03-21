@@ -17,7 +17,7 @@ async function billingRoutes(fastify) {
     if (!process.env.STRIPE_PRO_PRICE_ID) return reply.status(503).send({ error: 'stripe_not_configured', message: 'STRIPE_PRO_PRICE_ID not set' });
 
     try {
-      const user = getUserById(req.user.userId);
+      const user = await getUserById(req.user.userId);
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
       const session = await stripe.checkout.sessions.create({
@@ -43,7 +43,7 @@ async function billingRoutes(fastify) {
     if (!stripe) return reply.status(503).send({ error: 'stripe_not_configured', message: 'Stripe is not configured' });
 
     try {
-      const user = getUserById(req.user.userId);
+      const user = await getUserById(req.user.userId);
       if (!user.stripe_customer_id) {
         return reply.status(400).send({ error: 'no_subscription', message: 'No active subscription found' });
       }
@@ -86,16 +86,16 @@ async function billingRoutes(fastify) {
         const session = event.data.object;
         const userId = parseInt(session.metadata?.userId);
         if (userId) {
-          updateUserPlan(userId, 'pro', session.customer, session.subscription);
+          await updateUserPlan(userId, 'pro', session.customer, session.subscription);
           fastify.log.info('[Billing] User', userId, 'upgraded to pro');
         }
       }
 
       if (event.type === 'customer.subscription.deleted') {
         const sub = event.data.object;
-        const user = getUserByStripeCustomer(sub.customer);
+        const user = await getUserByStripeCustomer(sub.customer);
         if (user) {
-          updateUserPlan(user.id, 'free');
+          await updateUserPlan(user.id, 'free');
           fastify.log.info('[Billing] User', user.id, 'downgraded to free');
         }
       }
@@ -108,7 +108,7 @@ async function billingRoutes(fastify) {
 
   // GET /api/billing/status
   fastify.get('/api/billing/status', { preHandler: [requireAuth] }, async (req, reply) => {
-    const user = getUserById(req.user.userId);
+    const user = await getUserById(req.user.userId);
     return reply.send({
       plan: user.plan,
       hasSubscription: !!user.stripe_subscription_id,

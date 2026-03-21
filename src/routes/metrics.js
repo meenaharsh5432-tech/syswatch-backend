@@ -17,7 +17,7 @@ async function metricsRoutes(fastify) {
     try {
       const limit = Math.min(parseInt(req.query.limit) || 60, 1000);
       const agentId = req.query.agentId ? parseInt(req.query.agentId) : null;
-      const history = getMetricHistory(limit, agentId);
+      const history = await getMetricHistory(limit, agentId);
       return reply.send(history);
     } catch (err) {
       fastify.log.error(err);
