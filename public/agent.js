@@ -4,6 +4,7 @@
 const https = require('https');
 const http = require('http');
 const os = require('os');
+const osTotalMem = os.totalmem();
 
 const SYSWATCH_URL = process.env.SYSWATCH_URL || 'http://localhost:3001';
 const AGENT_KEY = process.env.AGENT_KEY;
@@ -24,10 +25,9 @@ try {
 }
 
 async function collectMetrics() {
-  const [cpuLoad, mem, memLayout, fsSizes, netStats] = await Promise.all([
+  const [cpuLoad, mem, fsSizes, netStats] = await Promise.all([
     si.currentLoad(),
     si.mem(),
-    si.memLayout(),
     si.fsSize(),
     si.networkStats()
   ]);
@@ -35,8 +35,7 @@ async function collectMetrics() {
   const fsEntry = fsSizes?.[0] || {};
   const netEntry = netStats?.[0] || {};
 
-  const physicalTotal = memLayout.reduce((sum, m) => sum + (m.size || 0), 0);
-  const memTotal = physicalTotal > 0 ? physicalTotal : mem.total;
+  const memTotal = osTotalMem;
   const memUsed = Math.min(mem.active ?? mem.used, memTotal);
 
   return {

@@ -1,19 +1,18 @@
 const si = require('systeminformation');
+const os = require('os');
 
 async function collectSystemMetrics() {
   try {
-    const [cpuLoad, mem, memLayout, fsSizes, netStats] = await Promise.all([
+    const [cpuLoad, mem, fsSizes, netStats] = await Promise.all([
       si.currentLoad(),
       si.mem(),
-      si.memLayout(),
       si.fsSize(),
       si.networkStats()
     ]);
 
     const cpu = parseFloat((cpuLoad.currentLoad ?? 0).toFixed(1));
 
-    const physicalTotal = memLayout.reduce((sum, m) => sum + (m.size || 0), 0);
-    const memTotal = physicalTotal > 0 ? physicalTotal : mem.total ?? 1;
+    const memTotal = os.totalmem();
     const memUsed = Math.min(mem.active ?? mem.used ?? 0, memTotal);
     const memory = {
       used: memUsed,
