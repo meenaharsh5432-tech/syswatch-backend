@@ -8,8 +8,8 @@ SYSWATCH_URL="${SYSWATCH_URL:-http://localhost:3001}"
 AGENT_KEY="${AGENT_KEY:-}"
 AGENT_NAME="${AGENT_NAME:-$(hostname)}"
 INTERVAL="${INTERVAL:-5000}"
-INSTALL_DIR="/opt/syswatch-agent"
-CONFIG_DIR="/etc/syswatch"
+INSTALL_DIR="${HOME}/.syswatch-agent"
+CONFIG_DIR="${HOME}/.syswatch"
 CONFIG_FILE="${CONFIG_DIR}/config"
 SERVICE_FILE="/etc/systemd/system/syswatch-agent.service"
 
@@ -32,13 +32,17 @@ log "Installing SysWatch Agent..."
 info "  Server name : $AGENT_NAME"
 info "  Backend URL : $SYSWATCH_URL"
 
-# ---- Require root ----
-if [ "$EUID" -ne 0 ]; then
-  error "Please run as root: sudo bash <(curl ...)"
+# ---- Root check (optional — needed only for systemd install) ----
+ROOT=false
+if [ "$EUID" -eq 0 ]; then
+  ROOT=true
 fi
 
 # ---- Node.js ----
 if ! command -v node &>/dev/null; then
+  if [ "$ROOT" = false ]; then
+    error "Node.js not found. Install Node.js >= 18 and re-run, or run as root so the script can install it."
+  fi
   warn "Node.js not found. Installing via NodeSource (LTS)..."
   if command -v apt-get &>/dev/null; then
     curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
@@ -93,10 +97,11 @@ chmod 600 "$CONFIG_FILE"
 log "Config written to $CONFIG_FILE"
 
 # ---- Systemd service ----
-if ! command -v systemctl &>/dev/null; then
-  warn "systemd not found. Starting agent manually..."
-  nohup node "${INSTALL_DIR}/agent.js" > /var/log/syswatch-agent.log 2>&1 &
-  log "Agent started (PID $!). Logs: tail -f /var/log/syswatch-agent.log"
+if ! command -v systemctl &>/dev/null || [ "$ROOT" = false ]; then
+  warn "Running without systemd (no root). Starting agent in background..."
+  LOGFILE="${HOME}/syswatch-agent.log"
+  nohup node "${INSTALL_DIR}/agent.js" > "$LOGFILE" 2>&1 &
+  log "Agent started (PID $!). Logs: tail -f $LOGFILE"
   exit 0
 fi
 
