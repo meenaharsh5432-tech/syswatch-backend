@@ -24,9 +24,10 @@ try {
 }
 
 async function collectMetrics() {
-  const [cpuLoad, mem, fsSizes, netStats] = await Promise.all([
+  const [cpuLoad, mem, memLayout, fsSizes, netStats] = await Promise.all([
     si.currentLoad(),
     si.mem(),
+    si.memLayout(),
     si.fsSize(),
     si.networkStats()
   ]);
@@ -34,12 +35,16 @@ async function collectMetrics() {
   const fsEntry = fsSizes?.[0] || {};
   const netEntry = netStats?.[0] || {};
 
+  const physicalTotal = memLayout.reduce((sum, m) => sum + (m.size || 0), 0);
+  const memTotal = physicalTotal > 0 ? physicalTotal : mem.total;
+  const memUsed = Math.min(mem.active ?? mem.used, memTotal);
+
   return {
     cpu: parseFloat((cpuLoad.currentLoad || 0).toFixed(1)),
     memory: {
-      used: mem.active ?? mem.used,
-      total: mem.total,
-      usedPercent: parseFloat((((mem.active ?? mem.used) / mem.total) * 100).toFixed(1))
+      used: memUsed,
+      total: memTotal,
+      usedPercent: parseFloat(((memUsed / memTotal) * 100).toFixed(1))
     },
     disk: {
       usePct: parseFloat((fsEntry.use || 0).toFixed(1)),
