@@ -41,7 +41,7 @@ async function authRoutes(fastify) {
         }).toString()
       });
       const tokens = await tokenRes.json();
-      if (!tokens.access_token) throw new Error('Failed to get access token from Google');
+      if (!tokens.access_token) throw new Error(`Google token error: ${tokens.error} - ${tokens.error_description}`);
 
       const profileRes = await fetch(`${GOOGLE_USERINFO_URL}?access_token=${tokens.access_token}`);
       const profile = await profileRes.json();
