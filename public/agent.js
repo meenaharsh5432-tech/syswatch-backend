@@ -37,9 +37,9 @@ async function collectMetrics() {
   return {
     cpu: parseFloat((cpuLoad.currentLoad || 0).toFixed(1)),
     memory: {
-      used: mem.used,
+      used: mem.active ?? mem.used,
       total: mem.total,
-      usedPercent: parseFloat(((mem.used / mem.total) * 100).toFixed(1))
+      usedPercent: parseFloat((((mem.active ?? mem.used) / mem.total) * 100).toFixed(1))
     },
     disk: {
       usePct: parseFloat((fsEntry.use || 0).toFixed(1)),

@@ -11,10 +11,12 @@ async function collectSystemMetrics() {
 
     const cpu = parseFloat((cpuLoad.currentLoad ?? 0).toFixed(1));
 
+    const memUsed = mem.active ?? mem.used ?? 0;
+    const memTotal = mem.total ?? 1;
     const memory = {
-      used: mem.used ?? 0,
-      total: mem.total ?? 1,
-      usedPercent: parseFloat(((mem.used / mem.total) * 100).toFixed(1))
+      used: memUsed,
+      total: memTotal,
+      usedPercent: parseFloat(((memUsed / memTotal) * 100).toFixed(1))
     };
 
     const fsEntry = fsSizes && fsSizes.length > 0 ? fsSizes[0] : {};
