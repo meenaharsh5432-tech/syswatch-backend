@@ -13,7 +13,7 @@ async function collectSystemMetrics() {
     const cpu = parseFloat((cpuLoad.currentLoad ?? 0).toFixed(1));
 
     const memTotal = os.totalmem();
-    const memUsed = Math.min(mem.active ?? mem.used ?? 0, memTotal);
+    const memUsed = Math.min(os.totalmem() - os.freemem(), memTotal);
     const pageFile = Math.max(0, (mem.total ?? 0) - memTotal);
     const memory = {
       used: memUsed,
@@ -22,13 +22,23 @@ async function collectSystemMetrics() {
       usedPercent: parseFloat(((memUsed / memTotal) * 100).toFixed(1))
     };
 
-    const fsEntry = fsSizes && fsSizes.length > 0 ? fsSizes[0] : {};
+    // Pick the primary drive: prefer the fs entry mounted at C:\ or / with the largest size
+    const fsEntry = (fsSizes && fsSizes.length > 0)
+      ? (fsSizes.find(f => f.mount === 'C:' || f.mount === 'C:\\' || f.mount === '/') ?? fsSizes.reduce((a, b) => (b.size > a.size ? b : a)))
+      : {};
     const disk = {
       usePct: parseFloat((fsEntry.use ?? 0).toFixed(1)),
       readMBps: parseFloat(((fsEntry.rw ?? 0) / 1024 / 1024).toFixed(2))
     };
 
-    const netEntry = netStats && netStats.length > 0 ? netStats[0] : {};
+    // Pick the most active non-loopback network interface
+    const activeNet = (netStats && netStats.length > 0)
+      ? netStats
+          .filter(n => n.iface && !n.iface.toLowerCase().includes('loopback') && n.iface !== 'lo')
+          .reduce((best, n) => ((n.rx_sec + n.tx_sec) > (best.rx_sec + best.tx_sec) ? n : best),
+            netStats.filter(n => n.iface && !n.iface.toLowerCase().includes('loopback') && n.iface !== 'lo')[0] || netStats[0])
+      : null;
+    const netEntry = activeNet ?? {};
     const network = {
       rxMbps: parseFloat(((netEntry.rx_sec ?? 0) * 8 / 1024 / 1024).toFixed(3)),
       txMbps: parseFloat(((netEntry.tx_sec ?? 0) * 8 / 1024 / 1024).toFixed(3))
