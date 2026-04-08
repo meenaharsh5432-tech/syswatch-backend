@@ -3,7 +3,9 @@ import { getPrisma } from '../lib/prisma.js'
 
 export async function requireAuth(request, reply) {
   try {
-    const token = request.cookies?.token
+    const authHeader = request.headers['authorization']
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
+
     if (!token) {
       return reply.status(401).send({ error: 'Not authenticated' })
     }

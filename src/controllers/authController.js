@@ -6,15 +6,6 @@ function issueToken(userId) {
   return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '30d' })
 }
 
-function setCookie(reply, token) {
-  reply.setCookie('token', token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    path: '/',
-    maxAge: 60 * 60 * 24 * 30 // 30 days
-  })
-}
 
 export async function googleRedirect(request, reply) {
   const params = new URLSearchParams({
@@ -64,11 +55,10 @@ export async function googleCallback(request, reply) {
     }
 
     const token = issueToken(user.id)
-    setCookie(reply, token)
 
     const redirectTo = user.onboardingDone
-      ? `${process.env.FRONTEND_URL}/dashboard`
-      : `${process.env.FRONTEND_URL}/onboarding`
+      ? `${process.env.FRONTEND_URL}/auth/callback?token=${token}`
+      : `${process.env.FRONTEND_URL}/auth/callback?token=${token}&onboarding=true`
 
     return reply.redirect(redirectTo)
   } catch (err) {
@@ -84,7 +74,6 @@ export async function getMe(request, reply) {
 }
 
 export async function logout(request, reply) {
-  reply.clearCookie('token', { path: '/' })
   return reply.send({ ok: true })
 }
 
