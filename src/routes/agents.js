@@ -18,11 +18,13 @@ async function agentsRoutes(fastify) {
     const agent = await createAgent(req.user.userId, name.trim());
     const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`;
     const installCommand = `curl -sSL ${backendUrl}/install.sh | SYSWATCH_URL=${backendUrl} AGENT_KEY=${agent.api_key} bash`;
+    const installCommandWin = `powershell -ExecutionPolicy Bypass -Command "\`$env:SYSWATCH_URL='${backendUrl}'; \`$env:AGENT_KEY='${agent.api_key}'; iwr ${backendUrl}/install.ps1 -UseBasicParsing | iex"`;
 
     return reply.status(201).send({
       agent: { id: agent.id, name: agent.name, status: 'offline', created_at: agent.created_at },
       apiKey: agent.api_key,
-      installCommand
+      installCommand,
+      installCommandWin
     });
   });
 

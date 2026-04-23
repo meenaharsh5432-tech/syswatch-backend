@@ -24,23 +24,44 @@ try {
   process.exit(1);
 }
 
+// Cache base CPU speed once at startup so we can normalize each tick
+// (matches Windows Task Manager "utility" mode which accounts for frequency scaling)
+let cpuBaseSpeed = 0;
+si.cpu().then(info => {
+  cpuBaseSpeed = info.speedMax || info.speed || 0;
+}).catch(() => {});
+
 async function collectMetrics() {
-  const [cpuLoad, mem, fsSizes, netStats] = await Promise.all([
+  const [cpuLoad, cpuSpeed, mem, fsSizes, netStats, diskIO] = await Promise.all([
     si.currentLoad(),
+    si.cpuCurrentSpeed(),
     si.mem(),
     si.fsSize(),
-    si.networkStats()
+    si.networkStats(),
+    si.disksIO().catch(() => null)
   ]);
 
-  const fsEntry = fsSizes?.[0] || {};
+  const fsEntry  = fsSizes?.[0]  || {};
   const netEntry = netStats?.[0] || {};
+  const ioEntry  = diskIO?.[0]   || {};
 
   const memTotal = osTotalMem;
-  const memUsed = Math.min(mem.active ?? mem.used, memTotal);
+  const memUsed  = Math.min(mem.active ?? mem.used, memTotal);
   const pageFile = Math.max(0, (mem.total ?? 0) - memTotal);
 
+  // Normalize CPU load by current vs max frequency — matches Task Manager on Windows
+  let cpu = cpuLoad.currentLoad || 0;
+  if (cpuBaseSpeed > 0 && cpuSpeed.avg > 0) {
+    cpu = cpu * (cpuSpeed.avg / cpuBaseSpeed);
+  }
+  cpu = parseFloat(Math.min(100, cpu).toFixed(1));
+
+  // Disk I/O in MB/s (reads + writes)
+  const diskReadMBps  = parseFloat(((ioEntry.rIO_sec  || 0) * 512 / 1024 / 1024).toFixed(2));
+  const diskWriteMBps = parseFloat(((ioEntry.wIO_sec  || 0) * 512 / 1024 / 1024).toFixed(2));
+
   return {
-    cpu: parseFloat((cpuLoad.currentLoad || 0).toFixed(1)),
+    cpu,
     memory: {
       used: memUsed,
       total: memTotal,
@@ -48,8 +69,9 @@ async function collectMetrics() {
       usedPercent: parseFloat(((memUsed / memTotal) * 100).toFixed(1))
     },
     disk: {
-      usePct: parseFloat((fsEntry.use || 0).toFixed(1)),
-      readMBps: parseFloat(((fsEntry.rw || 0) / 1024 / 1024).toFixed(2))
+      usePct:      parseFloat((fsEntry.use || 0).toFixed(1)), // storage space used %
+      readMBps:    diskReadMBps,
+      writeMBps:   diskWriteMBps
     },
     network: {
       rxMbps: parseFloat(((netEntry.rx_sec || 0) * 8 / 1024 / 1024).toFixed(3)),

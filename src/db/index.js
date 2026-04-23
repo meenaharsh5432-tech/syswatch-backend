@@ -30,6 +30,7 @@ async function initDB() {
   await db.collection('agents').createIndex({ id: 1 }, { unique: true });
   await db.collection('logs').createIndex({ agent_id: 1, id: -1 });
   await db.collection('metrics_history').createIndex({ agent_id: 1, id: -1 });
+  await db.collection('ai_requests').createIndex({ id: -1 });
 
   console.log('[DB] Connected to MongoDB Atlas');
 }
@@ -188,11 +189,43 @@ async function getLogs(limit = 100, level = null, agentId = null) {
   return results.reverse();
 }
 
+// ---- AI Requests ----
+async function insertAiRequest({ type, inputTokens, outputTokens, latencyMs, agentId = null }) {
+  try {
+    const id = await getNextId('ai_requests');
+    await db.collection('ai_requests').insertOne({
+      id, type,
+      inputTokens: inputTokens || 0,
+      outputTokens: outputTokens || 0,
+      latencyMs: latencyMs || 0,
+      agentId,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('[DB] insertAiRequest error:', err.message);
+  }
+}
+
+async function getAiStats() {
+  const docs = await db.collection('ai_requests').find({}, { projection: { _id: 0 } }).toArray();
+  const totalCalls = docs.length;
+  const totalInput = docs.reduce((s, d) => s + (d.inputTokens || 0), 0);
+  const totalOutput = docs.reduce((s, d) => s + (d.outputTokens || 0), 0);
+  const avgLatencyMs = totalCalls > 0
+    ? Math.round(docs.reduce((s, d) => s + (d.latencyMs || 0), 0) / totalCalls)
+    : 0;
+  // claude-sonnet-4: $3/MTok input, $15/MTok output
+  const estimatedCostUsd = parseFloat(((totalInput * 3 + totalOutput * 15) / 1_000_000).toFixed(4));
+  const recent = docs.slice(-20).reverse();
+  return { totalCalls, totalInput, totalOutput, avgLatencyMs, estimatedCostUsd, recent };
+}
+
 module.exports = {
   initDB,
   createUser, getUserById, getUserByGoogleId, getUserByStripeCustomer, updateUserPlan,
   createAgent, getAgentsByUserId, getAgentById, getAgentByApiKey,
   updateAgentLastSeen, deleteAgent, getAgentStatus,
   insertMetric, getMetricHistory,
-  insertLog, getLogs
+  insertLog, getLogs,
+  insertAiRequest, getAiStats
 };
